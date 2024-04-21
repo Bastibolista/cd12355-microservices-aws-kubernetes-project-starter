@@ -65,5 +65,5 @@ spec:
               name: db-env
               key: DB_PORT
         - name: DB_PASSWORD
-          value: lZQ6dE7n7q
+          value: DqeDl4EcYA
       restartPolicy: Always
