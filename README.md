@@ -20,19 +20,37 @@ For this project, you are a DevOps engineer who will be collaborating with a tea
 5. GitHub - pull and clone code
 
 ### Setup
-#### 1. Configure a Database
+#### 1. Create and configure you EKS Cluster
 Set up a Postgres database using a Helm Chart.
 
-1. Set up Bitnami Repo
+1. Create EKS Cluster
 ```bash
-helm repo add <REPO_NAME> https://charts.bitnami.com/bitnami
+eksctl create cluster --name my-cluster --version 1.29 --region us-east-1 --nodegroup-name my-nodes --node-type t3.small --nodes 1 --nodes-min 1 --nodes-max 2
 ```
 
-2. Install PostgreSQL Helm Chart
+2. Setup your kube-config k8s
 ```
-helm install <SERVICE_NAME> <REPO_NAME>/postgresql
+aws eks --region us-east-1 update-kubeconfig --name my-cluster
 ```
 
+3. Create and install CSI Driver (Use this tutorial [Install CSI Driver](https://www.stacksimplify.com/aws-eks/kubernetes-storage/install-aws-ebs-csi-driver-on-aws-eks-for-persistent-storage/).
+```
+kubectl apply -k "github.com/kubernetes-sigs/aws-ebs-csi-driver/deploy/kubernetes/overlays/stable/?ref=master"
+```
+#### 2.- Set Up a Postgres Database with Helm Chart
+1. Install Helm
+```bash
+curl -LO https://get.helm.sh/helm-v3.12.2-linux-amd64.tar.gz
+```
+
+2. Add the Bitnami Helm Repository
+```
+aws eks --region us-east-1 update-kubeconfig --name my-cluster
+```
+3. Install the PostgreSQL Chart
+```
+helm install my-postgresql oci://registry-1.docker.io/bitnamicharts/postgresql
+```
 This should set up a Postgre deployment at `<SERVICE_NAME>-postgresql.default.svc.cluster.local` in your Kubernetes cluster. You can verify it by running `kubectl svc`
 
 By default, it will create a username `postgres`. The password can be retrieved with the following command:
@@ -44,7 +62,7 @@ echo $POSTGRES_PASSWORD
 
 <sup><sub>* The instructions are adapted from [Bitnami's PostgreSQL Helm Chart](https://artifacthub.io/packages/helm/bitnami/postgresql).</sub></sup>
 
-3. Test Database Connection
+4. Test Database Connection
 The database is accessible within the cluster. This means that when you will have some issues connecting to it via your local environment. You can either connect to a pod that has access to the cluster _or_ connect remotely via [`Port Forwarding`](https://kubernetes.io/docs/tasks/access-application-cluster/port-forward-access-application-cluster/)
 
 * Connecting Via Port Forwarding
@@ -59,39 +77,29 @@ kubectl exec -it <POD_NAME> bash
 PGPASSWORD="<PASSWORD HERE>" psql postgres://postgres@<SERVICE_NAME>:5432/postgres -c <COMMAND_HERE>
 ```
 
-4. Run Seed Files
+5. Run Seed Files
 We will need to run the seed files in `db/` in order to create the tables and populate them with data.
 
 ```bash
-kubectl port-forward --namespace default svc/<SERVICE_NAME>-postgresql 5432:5432 &
-    PGPASSWORD="$POSTGRES_PASSWORD" psql --host 127.0.0.1 -U postgres -d postgres -p 5432 < <FILE_NAME.sql>
+kubectl port-forward --namespace default svc/my-postgresql 5433:5432 &
+    PGPASSWORD="$POSTGRES_PASSWORD" psql --host 127.0.0.1 -U postgres -d postgres -p 5433 < db/1_create_tables.sql
+    PGPASSWORD="$POSTGRES_PASSWORD" psql --host 127.0.0.1 -U postgres -d postgres -p 5433 < db/2_seed_users.sql 
+    PGPASSWORD="$POSTGRES_PASSWORD" psql --host 127.0.0.1 -U postgres -d postgres -p 5433 < db/3_seed_tokens.sql 
 ```
 
-### 2. Running the Analytics Application Locally
+### 3. Running the Analytics Application Locally
 In the `analytics/` directory:
 
 1. Install dependencies
 ```bash
-pip install -r requirements.txt
+python -m pip install --upgrade pip
+
+pip install -r analytics/requirements.txt
 ```
 2. Run the application (see below regarding environment variables)
 ```bash
-<ENV_VARS> python app.py
+DB_USERNAME=postgres DB_PASSWORD=$POSTGRES_PASSWORD python analytics/app.py
 ```
-
-There are multiple ways to set environment variables in a command. They can be set per session by running `export KEY=VAL` in the command line or they can be prepended into your command.
-
-* `DB_USERNAME`
-* `DB_PASSWORD`
-* `DB_HOST` (defaults to `127.0.0.1`)
-* `DB_PORT` (defaults to `5432`)
-* `DB_NAME` (defaults to `postgres`)
-
-If we set the environment variables by prepending them, it would look like the following:
-```bash
-DB_USERNAME=username_here DB_PASSWORD=password_here python app.py
-```
-The benefit here is that it's explicitly set. However, note that the `DB_PASSWORD` value is now recorded in the session's history in plaintext. There are several ways to work around this including setting environment variables in a file and sourcing them in a terminal session.
 
 3. Verifying The Application
 * Generate report for check-ins grouped by dates
@@ -100,32 +108,21 @@ The benefit here is that it's explicitly set. However, note that the `DB_PASSWOR
 * Generate report for check-ins grouped by users
 `curl <BASE_URL>/api/reports/user_visits`
 
-## Project Instructions
-1. Set up a Postgres database with a Helm Chart
-2. Create a `Dockerfile` for the Python application. Use a base image that is Python-based.
-3. Write a simple build pipeline with AWS CodeBuild to build and push a Docker image into AWS ECR
-4. Create a service and deployment using Kubernetes configuration files to deploy the application
-5. Check AWS CloudWatch for application logs
+### 4. Running the Analytics Application Locally
+1. Apply deployment for your k8s cluster
+```bash
+kubectl apply -f deploy/
+```
 
-### Deliverables
-1. `Dockerfile`
-2. Screenshot of AWS CodeBuild pipeline
-3. Screenshot of AWS ECR repository for the application's repository
-4. Screenshot of `kubectl get svc`
-5. Screenshot of `kubectl get pods`
-6. Screenshot of `kubectl describe svc <DATABASE_SERVICE_NAME>`
-7. Screenshot of `kubectl describe deployment <SERVICE_NAME>`
-8. All Kubernetes config files used for deployment (ie YAML files)
-9. Screenshot of AWS CloudWatch logs for the application
-10. `README.md` file in your solution that serves as documentation for your user to detail how your deployment process works and how the user can deploy changes. The details should not simply rehash what you have done on a step by step basis. Instead, it should help an experienced software developer understand the technologies and tools in the build and deploy process as well as provide them insight into how they would release new builds.
+## 5: Setup CloudWatch Agent
 
-
-### Stand Out Suggestions
-Please provide up to 3 sentences for each suggestion. Additional content in your submission from the standout suggestions do _not_ impact the length of your total submission.
-1. Specify reasonable Memory and CPU allocation in the Kubernetes deployment configuration
-2. In your README, specify what AWS instance type would be best used for the application? Why?
-3. In your README, provide your thoughts on how we can save on costs?
-
-### Best Practices
-* Dockerfile uses an appropriate base image for the application being deployed. Complex commands in the Dockerfile include a comment describing what it is doing.
-* The Docker images use semantic versioning with three numbers separated by dots, e.g. `1.2.1` and  versioning is visible in the  screenshot. See [Semantic Versioning](https://semver.org/) for more details.
+1. Apply deployment for your k8s cluster
+```bash
+ClusterName=p3-cluster
+RegionName=us-east-1
+FluentBitHttpPort='2020'
+FluentBitReadFromHead='Off'
+[[ ${FluentBitReadFromHead} = 'On' ]] && FluentBitReadFromTail='Off'|| FluentBitReadFromTail='On'
+[[ -z ${FluentBitHttpPort} ]] && FluentBitHttpServer='Off' || FluentBitHttpServer='On'
+curl https://raw.githubusercontent.com/aws-samples/amazon-cloudwatch-container-insights/latest/k8s-deployment-manifest-templates/deployment-mode/daemonset/container-insights-monitoring/quickstart/cwagent-fluent-bit-quickstart.yaml | sed 's/{{cluster_name}}/'${ClusterName}'/;s/{{region_name}}/'${RegionName}'/;s/{{http_server_toggle}}/"'${FluentBitHttpServer}'"/;s/{{http_server_port}}/"'${FluentBitHttpPort}'"/;s/{{read_from_head}}/"'${FluentBitReadFromHead}'"/;s/{{read_from_tail}}/"'${FluentBitReadFromTail}'"/' | kubectl apply -f -
+```
