@@ -3,8 +3,9 @@ kind: Service
 metadata:
   name: coworking-api
 spec:
+  type: LoadBalancer
   selector:
-    app.kubernetes.io/name: coworking-api
+    app: coworking-api
   ports:
   - name: "5153"
     protocol: TCP
@@ -30,7 +31,6 @@ spec:
       containers:
       - name: coworking-api
         image: 261386442092.dkr.ecr.us-east-1.amazonaws.com/coworking-checkin:latest
-        imagePullPolicy: Always
         livenessProbe:
           httpGet:
             path: /health_check
@@ -65,5 +65,8 @@ spec:
               name: db-env
               key: DB_PORT
         - name: DB_PASSWORD
-          value: DqeDl4EcYA
+          valueFrom:
+            secretKeyRef:
+              name: secret
+              key: DB_PASSWORD
       restartPolicy: Always
